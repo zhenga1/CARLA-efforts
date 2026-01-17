@@ -18,7 +18,7 @@ if __name__ == "__main__":
         default=500,
         help='Number of steps to run EACH episode in the environment'
     )
-    argparse.add_argument(
+    argparser.add_argument(
         '--episodes',
         type=int,
         default=1000,
@@ -52,14 +52,15 @@ if __name__ == "__main__":
         done = False
         episode_reward = 0.0  # accumulated reward for this specific episode
 
-        for step in range(steps):
+        while not done:
             steer = np.random.uniform(-0.2, 0.2)
             throttle = 0.5
 
             # obs is an image, reward is speed, done is always False
             obs, reward, done = env.step(steer, throttle, first_person=first_person)
-            print(f"Step {step} | reward={reward:.2f}")
+            episode_reward += reward
 
-            time.sleep(0.05)
+            time.sleep(0.05) # visualization only
+        print(f"Episode {episode} | reward={episode_reward:.2f}")
         
     env.close()
