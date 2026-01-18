@@ -96,15 +96,31 @@ class CarlaLaneEnv:
         spectator = self.world.get_spectator()
         transform = self.vehicle.get_transform()
 
-        x_bias = -6 if first_person else -10
+        # Vehicle orientation vector (world frame)
+        forward = transform.get_forward_vector()
+        right = transform.get_right_vector()
+
+        # offsets desired
+        distance_back = 6.0
+        height = 3.0
+        lateral_offset = 0.0  # keep 0 unless you want cinematic angle
+
+        # Compute camera location and rotation in world coordinates
+        cam_location = (
+            transform.location
+            - forward * distance_back
+            + right * lateral_offset
+            + carla.Location(z=height)
+        )
+
+        cam_rotation = carla.Rotation(
+            pitch=-15,
+            yaw=transform.rotation.yaw,
+            roll=0.0
+        )
+
         spectator.set_transform(
-            carla.Transform(
-                transform.location + carla.Location(x=x_bias, z=3),
-                carla.Rotation(
-                    pitch=-15,
-                    yaw=transform.rotation.yaw
-                )
-            )
+            carla.Transform(cam_location, cam_rotation)
         )
 
     def _attach_camera(self):
