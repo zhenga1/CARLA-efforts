@@ -1,5 +1,5 @@
 import numpy as np
-from env.carla_env import CarlaLaneEnv
+from env.carla_env_ppo import CarlaLaneEnvPPO, ActorCritic
 import time
 import argparse
 
@@ -41,13 +41,17 @@ if __name__ == "__main__":
 
     num_episodes = args.episodes
 
-    env = CarlaLaneEnv()
+    rollout = []
+
+    env = CarlaLaneEnvPPO()
     obs = env.reset()
+
+    model = ActorCritic(obs.shape)
+    
     # No training at the moment
     # Just trying to test environment interaction
     for episode in range(num_episodes):
         print(f"=== Episode {episode} ===")
-        
         obs = env.reset() # get the current image
         done = False
         episode_reward = 0.0  # accumulated reward for this specific episode
@@ -56,8 +60,18 @@ if __name__ == "__main__":
             steer = np.random.uniform(-0.2, 0.2)
             throttle = 0.5
 
-            # obs is an image, reward is speed, done is always False
-            obs, reward, done = env.step(steer, throttle, first_person=first_person)
+            # choose an action for the model to take
+            steer, throttle, logp, value = CarlaLaneEnvPPO.act(model, obs)
+
+            # obs is an image, reward is speed, done is whether the episode has finished
+            next_obs, reward, done = env.step(steer, throttle, first_person=first_person)
+
+            # Rollout storage
+            rollout.append((obs, steer, throttle, logp, reward, done, value))
+            
+            # move to the next observation
+            obs = next_obs
+
             episode_reward += reward
 
             time.sleep(0.05) # visualization only

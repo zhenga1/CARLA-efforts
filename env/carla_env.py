@@ -4,11 +4,20 @@ import random
 import time
 
 class CarlaLaneEnv:
-    def __init__(self, max_steps=500):
+    def __init__(self, max_steps=500, client_setup_timeout=10.0, camera_setup_timeout=5.0, add_min_speed_penalty=True,
+                  speed_reward_multiplier=0.45, slow_speed_threshold=0.1, max_stuck_step_count=50):
+        # define class properties
+        self.client_setup_timeout = client_setup_timeout
+        self.camera_setup_timeout = camera_setup_timeout
+        self.add_min_speed_penalty = add_min_speed_penalty
+        self.speed_reward_multiplier = speed_reward_multiplier
+        self.slow_speed_threshold = slow_speed_threshold
+        self.max_stuck_step_count = max_stuck_step_count
+        
         # IP address of the CARLA Client, and the TCP port to communicate with
         # Two ports are needed, always the given port, given port + 1
         self.client = carla.Client('localhost', 2000)
-        self.client.set_timeout(10.0) # nonblocking option on the client
+        self.client.set_timeout(self.client_setup_timeout) # nonblocking option on the client
         self.world = self.client.get_world() # retrieve the current world
 
         self.bp_lib = self.world.get_blueprint_library() # retrieve the blueprint library
@@ -16,6 +25,9 @@ class CarlaLaneEnv:
         # max # of steps per episode
         self.max_steps = max_steps
         self.current_step = 0
+        
+        # keep track of how many steps the vehicle has been stuck for
+        self.stuck_steps = 0 
 
         # variables to keep track of actors
         self.vehicle = None
@@ -26,8 +38,9 @@ class CarlaLaneEnv:
         if self.vehicle:
             self.vehicle.destroy()
         
-        # resetting the step counter
+        # resetting the step counter and the stuck counter
         self.current_step = 0
+        self.stuck_steps = 0
 
         # making sure the synchronous mode is enabled
         settings = self.world.get_settings()
@@ -36,6 +49,13 @@ class CarlaLaneEnv:
         self.world.apply_settings(settings)
         # Call tick to start the simulation
         self.world.tick()
+
+        # spawn the vehicle at a random spawn point with ROBUST error protection
+        spawn_points = self.world.get_map().get_spawn_points()
+        # random.shuffle(spawn_points)
+        # temp_vehicle = None
+        # for spawn in spawn_points[:50]:
+        #     temp_vehicle = self.world.try_spawn_actor(bp, spawn)
 
         spawn = random.choice(self.world.get_map().get_spawn_points())
         bp = self.bp_lib.filter("vehicle.*model3*")[0]
@@ -52,6 +72,14 @@ class CarlaLaneEnv:
             carla.Rotation(pitch=-15))
         )
 
+        time_waited = 0.0
+        while self.image is None:
+            self.world.tick()  # wait until the first image is received
+            print("Waiting for camera image..., waited {:.1f}s".format(time_waited))
+            time.sleep(0.1)
+            time_waited += 0.1
+            if time_waited >= self.camera_setup_timeout:
+                raise TimeoutError("Timeout while waiting for camera image.")
         return self.image
 
     def _follow_vehicle(self, first_person=False):
@@ -132,12 +160,25 @@ class CarlaLaneEnv:
 
         # Reward shaping
         reward = 1.0 - norm_dev  # max reward at center, min at edge
-        reward = max(reward, -1.0) # ensure non-negative
+        reward = max(reward, -1.0) # ensure reward is not too negative
 
         done = norm_dev > 1.2 # off-lane threshold
         print(f"Lane reward={reward:.2f}, deviation={deviation:.2f}")
 
         return reward, done
+    
+    def _speed_reward(self):
+        velocity = self.vehicle.get_velocity()
+        speed = np.linalg.norm([velocity.x, velocity.y])
+        if speed < self.slow_speed_threshold:
+            self.stuck_steps += 1
+        else:
+            self.stuck_steps = 0
+        speed_bonus = self.speed_reward_multiplier * speed
+        if self.add_min_speed_penalty and speed < self.slow_speed_threshold:
+            speed_bonus -= 1.0  # penalty for being nearly stationary
+        return speed_bonus
+        
 
     def step(self, steer, throttle, first_person=False):
         self.vehicle.apply_control(
@@ -151,17 +192,25 @@ class CarlaLaneEnv:
 
         lane_reward, hasfail = self._lane_reward()
 
-        velocity = self.vehicle.get_velocity()
-        speed = np.linalg.norm([velocity.x, velocity.y])
-        speed_bonus = 0.05 * speed
+        # calculate speed reward, increment stuck steps
+        speed_reward = self._speed_reward()
 
+        # increment step counters
         self.current_step += 1
+
         steps_done = self.current_step >= self.max_steps
 
         done = hasfail or steps_done
 
-        reward = lane_reward + speed_bonus # speed
-        #done = False
+        # calculate reward
+        reward = lane_reward + speed_reward # speed
+        reward -= 0.3   # constant time penalty so staying still = BAD
+
+        # deal with case of being stuck for too long
+        if self.stuck_steps > self.max_stuck_step_count:   # ~2.5 seconds
+            reward -= 5.0
+            done = True
+
 
         return self.image, reward, done
     
