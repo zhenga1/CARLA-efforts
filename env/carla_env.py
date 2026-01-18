@@ -35,8 +35,15 @@ class CarlaLaneEnv:
         self.image = None
     
     def reset(self):
+        # destroy existing actors to start fresh 
         if self.vehicle:
             self.vehicle.destroy()
+            self.vehicle = None
+        if self.camera:
+            self.camera.destroy()
+            self.camera = None
+        
+        self.world.tick()  # advance the simulation to ensure clean state
         
         # resetting the step counter and the stuck counter
         self.current_step = 0
@@ -52,14 +59,17 @@ class CarlaLaneEnv:
 
         # spawn the vehicle at a random spawn point with ROBUST error protection
         spawn_points = self.world.get_map().get_spawn_points()
-        # random.shuffle(spawn_points)
-        # temp_vehicle = None
-        # for spawn in spawn_points[:50]:
-        #     temp_vehicle = self.world.try_spawn_actor(bp, spawn)
-
-        spawn = random.choice(self.world.get_map().get_spawn_points())
-        bp = self.bp_lib.filter("vehicle.*model3*")[0]
-        self.vehicle = self.world.spawn_actor(bp, spawn)
+        bp = self.bp_lib.filter("vehicle.*model3*")[0]  # Tesla Model 3
+        random.shuffle(spawn_points)
+        temp_vehicle = None
+        for spawn in spawn_points[:50]:
+            temp_vehicle = self.world.try_spawn_actor(bp, spawn)
+            if temp_vehicle is not None:
+                break
+        if temp_vehicle is None:
+            raise RuntimeError("Failed to spawn vehicle after multiple attempts.")
+        
+        self.vehicle = temp_vehicle
         print("Vehicle spawned:", self.vehicle.id)
 
         self._attach_camera()  # get the camera
