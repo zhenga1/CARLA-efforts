@@ -1,5 +1,7 @@
+from turtle import update
 import numpy as np
-from env.carla_env_ppo import CarlaLaneEnvPPO, ActorCritic
+import torch
+from env.carla_env_ppo import CarlaLaneEnvPPO, ActorCritic, ppo_update
 import time
 import argparse
 
@@ -39,7 +41,7 @@ if __name__ == "__main__":
     steps = args.steps
     first_person = args.firstperson
 
-    num_episodes = args.episodes
+    num_episodoes = args.episodes
 
     rollout = []
 
@@ -47,10 +49,11 @@ if __name__ == "__main__":
     obs = env.reset()
 
     model = ActorCritic(obs.shape)
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
     
     # No training at the moment
     # Just trying to test environment interaction
-    for episode in range(num_episodes):
+    for episode in range(num_episodoes): # num_updates in range(num_episodes):
         print(f"=== Episode {episode} ===")
         obs = env.reset() # get the current image
         done = False
@@ -75,6 +78,9 @@ if __name__ == "__main__":
             episode_reward += reward
 
             time.sleep(0.05) # visualization only
+        
+        ppo_update(model, optimizer, rollout)
+
         print(f"Episode {episode} | reward={episode_reward:.2f}")
         
     env.close()

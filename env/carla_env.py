@@ -193,6 +193,20 @@ class CarlaLaneEnv:
 
         return reward, done
     
+    # def _forward_speed(self):
+    #     """
+    #     Docstring for _forward_speed
+        
+    #     :param self: Description
+    #     """
+    #     velocity = self.vehicle.get_velocity()
+    #     vel = np.array([velocity.x, velocity.y])
+    #     forward_vector = self.vehicle.get_transform().get_forward_vector()
+    #     forward = np.array([forward_vector.x, forward_vector.y])
+    #     forward = forward / np.linalg.norm(forward)
+    #     speed = np.dot(vel, forward)
+    #     return speed
+
     def _speed_reward(self):
         velocity = self.vehicle.get_velocity()
         speed = np.linalg.norm([velocity.x, velocity.y])
@@ -220,6 +234,12 @@ class CarlaLaneEnv:
 
         # calculate speed reward, increment stuck steps
         speed_reward = self._speed_reward()
+        yaw_penalty = abs(self.vehicle.get_angular_velocity().z) * 0.2
+        yaw_reward_default = 0.5
+        yaw_reward = max(0.0, yaw_reward_default - yaw_penalty)
+        # forward speed reward
+        # forward_speed = self._forward_speed()
+        # speed_reward = self.speed_reward_multiplier * forward_speed
 
         # increment step counters
         self.current_step += 1
@@ -228,13 +248,16 @@ class CarlaLaneEnv:
 
         done = hasfail or steps_done
 
+
         # calculate reward
-        reward = lane_reward + speed_reward # speed
+        reward = speed_reward # speed
         reward -= 0.3   # constant time penalty so staying still = BAD
+        reward += yaw_reward  # reward for not yawing too much
+        print("Final reward: ", reward)
 
         # deal with case of being stuck for too long
         if self.stuck_steps > self.max_stuck_step_count:   # ~2.5 seconds
-            reward -= 5.0
+            reward -= 10.0 # heavy penalty for being stuck
             done = True
 
 
