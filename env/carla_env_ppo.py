@@ -52,17 +52,12 @@ def ppo_update(
     """
     device = next(model.parameters()).device # efficient way to get the model device
     # -- unpack the entire rollout --
-    obs, steer, throttle, logp_old, rewards, dones, values = zip(*rollout)
+    obs, action_old, logp_old, rewards, dones, values = zip(*rollout)
 
     obs = torch.stack(obs).to(device) # (T, C, H, W), turn a list of tensors into a single tensor
-    actions = torch.tensor(
-        list(zip(steer, throttle)), 
-        dtype=torch.float32,
-        device=device
-    ) # (T, 2)
-
+    actions_old = torch.stack(action_old).to(device) # (T, 2)
     # -- convert to tensors via stacking --
-    print(f"obs shape: {obs.shape}, actions shape: {actions.shape}")
+    print(f"obs shape: {obs.shape}, actions shape: {actions_old.shape}")
     old_logp = torch.tensor(logp_old, dtype=torch.float32, device=device) # (T,)
     print("Old logp shape:", old_logp.shape)
     rewards = torch.tensor(rewards, dtype=torch.float32, device=device) # (T,)
@@ -94,12 +89,12 @@ def ppo_update(
 
             # -- mini-batch, getting some of the rollout data --
             mb_obs = obs[idx]
-            mb_actions = actions[idx]
+            mb_actions = action_old[idx]
             mb_old_logp = old_logp[idx]
             mb_adv = advantages[idx]
             mb_returns = returns[idx]
 
-            # -- forward pass --
+            # -- forward pass, enable learning --
             mu, std, value_pred = model(mb_obs)
             dist = Normal(mu, std)
 
@@ -111,8 +106,14 @@ def ppo_update(
             raw1 = torch.log(throttle / (1 - throttle))  # inverse sigmoid
             raw_action = torch.stack([raw0, raw1], dim=-1) # get the original output 
 
-            # Re-compute log prob
+            # Re-compute raw log prob from the distribution
             new_logp = dist.log_prob(raw_action).sum(dim=-1)
+            # Calculate the Jacobian correction for the squashing functions
+            # for tanh (for the first variable, the steer)
+            corr_steer = torch.log(1 - steer.pow(2) + 1e-6)
+            corr_throttle = torch.log(throttle * (1 - throttle) + 1e-6)
+            new_logp = new_logp - torch.stack([corr_steer, corr_throttle], dim=-1).sum(dim=-1) # corr_steer - corr_throttle
+            print("New logp:", new_logp)
             entropy = dist.entropy().sum(dim=-1)
 
             # Old pro
@@ -135,10 +136,6 @@ def ppo_update(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             optimizer.step()
-
-
-
-
 
 
 
@@ -244,5 +241,11 @@ class CarlaLaneEnvPPO (CarlaLaneEnv):
         steer = torch.tanh(action[0,0])  # ensure steer is in [-1,1]
         throttle = torch.sigmoid(action[0,1])  # ensure throttle is in [0,1]
 
-        return steer.item(), throttle.item(), log_prob.item(), value.item()
+        steer_jacobian_correction = torch.log(1 - steer.pow(2) + 1e-6)
+        throttle_jacobian_correction = torch.log(throttle * (1 - throttle) + 1e-6)
+        correction = torch.stack([steer_jacobian_correction, throttle_jacobian_correction], dim=-1).sum(dim=-1)
+        log_prob = log_prob - correction
+        print("Log prob after correction:", log_prob)
+
+        return action, steer.item(), throttle.item(), log_prob.item(), value.item()
     

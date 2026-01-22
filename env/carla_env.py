@@ -189,7 +189,7 @@ class CarlaLaneEnv:
         reward = max(reward, -1.0) # ensure reward is not too negative
 
         done = norm_dev > 1.2 # off-lane threshold
-        print(f"Lane reward={reward:.2f}, deviation={deviation:.2f}")
+        #print(f"Lane reward={reward:.2f}, deviation={deviation:.2f}")
 
         return reward, done
     
@@ -210,14 +210,32 @@ class CarlaLaneEnv:
     def _speed_reward(self):
         velocity = self.vehicle.get_velocity()
         speed = np.linalg.norm([velocity.x, velocity.y])
-        if speed < self.slow_speed_threshold:
-            self.stuck_steps += 1
-        else:
-            self.stuck_steps = 0
+        self._increment_stuck_counter()
         speed_bonus = self.speed_reward_multiplier * speed
         if self.add_min_speed_penalty and speed < self.slow_speed_threshold:
             speed_bonus -= 1.0  # penalty for being nearly stationary
         return speed_bonus
+    
+    def _increment_stuck_counter(self):
+        velocity = self.vehicle.get_velocity()
+        speed = np.linalg.norm([velocity.x, velocity.y])
+        if speed < self.slow_speed_threshold:
+            self.stuck_steps += 1
+        else:
+            self.stuck_steps = 0
+
+    def _get_forward_progress(self):
+        v = self.vehicle.get_velocity()
+
+        speed = np.linalg.norm([v.x, v.y])
+
+        waypoint = self.world.get_map().get_waypoint(
+            self.vehicle.get_location(), project_to_road=True, lane_type=carla.LaneType.Driving
+        )
+        lane_forward = waypoint.transform.get_forward_vector()
+        
+        dot_product = v.x * lane_forward.x + v.y * lane_forward.y
+        return dot_product, speed
         
 
     def step(self, steer, throttle, first_person=False):
@@ -230,37 +248,40 @@ class CarlaLaneEnv:
         self.world.tick()  # advance the simulation
         self._follow_vehicle(first_person)
 
-        lane_reward, hasfail = self._lane_reward()
+        # increment stuck counter
+        self._increment_stuck_counter()
 
-        # calculate speed reward, increment stuck steps
-        speed_reward = self._speed_reward()
-        yaw_penalty = abs(self.vehicle.get_angular_velocity().z) * 0.2
-        yaw_reward_default = 0.5
-        yaw_reward = max(0.0, yaw_reward_default - yaw_penalty)
-        # forward speed reward
-        # forward_speed = self._forward_speed()
-        # speed_reward = self.speed_reward_multiplier * forward_speed
+        # Directional progress
+        forward_progress, speed = self._get_forward_progress()
 
-        # increment step counters
-        self.current_step += 1
+        # Lane keeping reward
+        lane_reward, has_failed = self._lane_reward()
 
-        steps_done = self.current_step >= self.max_steps
+        # Smoothness reward
+        ang_v = self.vehicle.get_angular_velocity()
+        yaw_penalty = abs(ang_v.z) * 0.5
 
-        done = hasfail or steps_done
+        # Final reward building
+        reward =  1.0*forward_progress
+        reward += lane_reward
+        reward -=  yaw_penalty
 
+        # Small constant penalty to discourage idling
+        reward -= 0.1
 
-        # calculate reward
-        reward = speed_reward # speed
-        reward -= 0.3   # constant time penalty so staying still = BAD
-        reward += yaw_reward  # reward for not yawing too much
-        print("Final reward: ", reward)
+        print("Forward progress: {:.2f}, Speed: {:.2f}, Lane reward: {:.2f}, Yaw penalty: {:.2f}, Total reward: {:.2f}".format(forward_progress, speed, lane_reward, yaw_penalty, reward))
 
-        # deal with case of being stuck for too long
-        if self.stuck_steps > self.max_stuck_step_count:   # ~2.5 seconds
-            reward -= 10.0 # heavy penalty for being stuck
+        # 4. Handle Failures / Stuck
+        if has_failed:
+            reward = -20.0
             done = True
-
-
+        elif self.stuck_steps >= self.max_stuck_step_count:
+            reward = -10.0
+            done = True
+        else:
+            done = self.current_step >= self.max_steps
+        
+        self.current_step += 1
         return self.image, reward, done
     
     def close(self):

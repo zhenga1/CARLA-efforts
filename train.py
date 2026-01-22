@@ -64,13 +64,13 @@ if __name__ == "__main__":
             throttle = 0.5
 
             # choose an action for the model to take
-            steer, throttle, logp, value = CarlaLaneEnvPPO.act(model, obs)
+            action, steer, throttle, logp, value = CarlaLaneEnvPPO.act(model, obs)
 
             # obs is an image, reward is speed, done is whether the episode has finished
             next_obs, reward, done = env.step(steer, throttle, first_person=first_person)
 
             # Rollout storage
-            rollout.append((obs, steer, throttle, logp, reward, done, value))
+            rollout.append((obs, action, logp, reward, done, value))
             
             # move to the next observation
             obs = next_obs
