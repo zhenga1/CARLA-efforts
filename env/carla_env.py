@@ -269,7 +269,7 @@ class CarlaLaneEnv:
         # Small constant penalty to discourage idling
         reward -= 0.1
 
-        print("Forward progress: {:.2f}, Speed: {:.2f}, Lane reward: {:.2f}, Yaw penalty: {:.2f}, Total reward: {:.2f}".format(forward_progress, speed, lane_reward, yaw_penalty, reward))
+        print("Forward progress: {:.2f}, Speed: {:.2f}, Lane reward: {:.2f}, Yaw penalty: {:.2f}, Stuck Steps: {:.2f}, Total reward: {:.2f}".format(forward_progress, speed, lane_reward, yaw_penalty, self.stuck_steps, reward))
 
         # 4. Handle Failures / Stuck
         if has_failed:

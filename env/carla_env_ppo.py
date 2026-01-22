@@ -80,16 +80,16 @@ def ppo_update(
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages
 
     T = obs.size(0)
-    indices = torch.randperm(T) # Random permutations of integers
-
     # --- PPO optimization ---
     for _ in range(epochs):
+        # every episode reshuffle
+        indices = torch.randperm(T) # Random permutations of integers
         for start in range(0, T, batch_size):
             idx = indices[start:start+batch_size]
 
             # -- mini-batch, getting some of the rollout data --
             mb_obs = obs[idx]
-            mb_actions = action_old[idx]
+            mb_actions = actions_old[idx]
             mb_old_logp = old_logp[idx]
             mb_adv = advantages[idx]
             mb_returns = returns[idx]
@@ -98,20 +98,20 @@ def ppo_update(
             mu, std, value_pred = model(mb_obs)
             dist = Normal(mu, std)
 
-            # -- inverse squashing (squash the steer + throttle to get a valid range of control) --
-            steer = mb_actions[:,0].clamp(-0.999, 0.999)
-            throttle = mb_actions[:,1].clamp(0.0001, 0.9999)
-
-            raw0 = torch.atanh(steer)  # inverse tanh, bring the value back to real line
-            raw1 = torch.log(throttle / (1 - throttle))  # inverse sigmoid
-            raw_action = torch.stack([raw0, raw1], dim=-1) # get the original output 
 
             # Re-compute raw log prob from the distribution
-            new_logp = dist.log_prob(raw_action).sum(dim=-1)
+            new_logp = dist.log_prob(mb_actions).sum(dim=-1)
+
+            # Get the steer and throttle from raw action
+            #print("mb_actions shape", mb_actions.shape)
+            mb_actions = mb_actions.squeeze() # remove 1 dim dimensions
+            steer = torch.tanh(mb_actions[:,0])  # ensure steer is in [-1,1]
+            throttle = torch.sigmoid(mb_actions[:,1])  # ensure throttle is in [0,1]
+
             # Calculate the Jacobian correction for the squashing functions
             # for tanh (for the first variable, the steer)
-            corr_steer = torch.log(1 - steer.pow(2) + 1e-6)
-            corr_throttle = torch.log(throttle * (1 - throttle) + 1e-6)
+            corr_steer = torch.log(1 - steer.pow(2) + 1e-7)
+            corr_throttle = torch.log(throttle * (1 - throttle) + 1e-7)
             new_logp = new_logp - torch.stack([corr_steer, corr_throttle], dim=-1).sum(dim=-1) # corr_steer - corr_throttle
             print("New logp:", new_logp)
             entropy = dist.entropy().sum(dim=-1)
@@ -128,8 +128,11 @@ def ppo_update(
             value_loss = value_coef * (mb_returns - value_pred).pow(2).mean()
             entropy_loss = -entropy_coef * entropy.mean()
 
+            # -- Action regularization ---
+            action_reg_loss = 0.01 * mb_actions.pow(2).mean()
+
             # --- Total Accumulated Loss ---
-            loss = policy_loss + value_loss + entropy_loss
+            loss = policy_loss + value_loss + entropy_loss + action_reg_loss
 
             # --- Backpropagation ---
             optimizer.zero_grad()
@@ -187,7 +190,10 @@ class ActorCritic (torch.nn.Module):
 
         # Actor model 
         mu = self.mu(x)
-        std = self.log_std.exp()
+        
+        # Add a clamp later to log std
+        log_std = torch.clamp(self.log_std, min=-2.0, max=2.0)
+        std = torch.exp(log_std)
 
         # Critic model
         value = self.value(x)
@@ -241,11 +247,15 @@ class CarlaLaneEnvPPO (CarlaLaneEnv):
         steer = torch.tanh(action[0,0])  # ensure steer is in [-1,1]
         throttle = torch.sigmoid(action[0,1])  # ensure throttle is in [0,1]
 
-        steer_jacobian_correction = torch.log(1 - steer.pow(2) + 1e-6)
-        throttle_jacobian_correction = torch.log(throttle * (1 - throttle) + 1e-6)
+        # safety jacobian
+        steer_jacobian_correction = torch.log(1 - steer.pow(2) + 1e-7)
+        throttle_jacobian_correction = torch.log(throttle * (1 - throttle) + 1e-7)
         correction = torch.stack([steer_jacobian_correction, throttle_jacobian_correction], dim=-1).sum(dim=-1)
         log_prob = log_prob - correction
         print("Log prob after correction:", log_prob)
 
+        # if log_prob.item() > 15.0:
+        #     import pdb
+        #     pdb.set_trace()
         return action, steer.item(), throttle.item(), log_prob.item(), value.item()
     

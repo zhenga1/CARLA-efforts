@@ -49,7 +49,8 @@ if __name__ == "__main__":
     obs = env.reset()
 
     model = ActorCritic(obs.shape)
-    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
+    lr = 1e-4
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
     # No training at the moment
     # Just trying to test environment interaction
