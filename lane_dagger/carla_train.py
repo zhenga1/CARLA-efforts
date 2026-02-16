@@ -1,7 +1,7 @@
 import torch.optim as optim
 import torch.nn as nn
 import torch
-from carla_model import DrivingCNN
+from carla_model import *
 from carla_dataset import *
 from torch.utils.data import DataLoader
 import h5py
@@ -87,12 +87,14 @@ def save_data_to_h5(filename, images, targets):
     print("Data saved to", filename)
 
 image_index = 0
+seq_len = 3
+stride = 1
 if __name__=="__main__":
     ### Basic Parameters
     directory = Path(DIR_PATH_TRAIN)
 
     # Define model and everything else
-    model = DrivingCNN().to(device)
+    model = DrivingCNNSequential(seq_len=seq_len).to(device)
 
     # Define loss function and optimizer
     criterion = nn.MSELoss()
@@ -106,7 +108,7 @@ if __name__=="__main__":
         threshold=lr_threshold, #only trigger when loss improves by 0.001, i.e. 0.1%
         verbose=True
     )
-    dataset = CarlaH5GlobalDataset(directory)
+    dataset = CarlaH5GlobalDatasetWithSequence(directory, sequence_len=seq_len, stride=stride)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     ##### 

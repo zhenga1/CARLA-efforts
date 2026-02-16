@@ -58,8 +58,15 @@ def destroy_and_recreate(world, vehicle, camera, bp_lib):
 
     # Spawn a new vehicle
     bp = bp_lib.filter('vehicle.*model3*')[0]
-    spawn_point = world.get_map().get_spawn_points()[0]
-    new_vehicle = world.spawn_actor(bp, spawn_point)
+    
+    # get random spawn points and choose one randomly to spawn the vehicle
+    spawn_points = world.get_map().get_spawn_points()
+    new_vehicle = None
+    while new_vehicle is None:
+        spawn_point = spawn_points[np.random.randint(len(spawn_points))]
+        #spawn_point = world.get_map().get_spawn_points()[0]
+        new_vehicle = world.try_spawn_actor(bp, spawn_point)
+    
     print("New vehicle spawned.")
 
     # 4. Attach Camera (Must match training sensor position!)
