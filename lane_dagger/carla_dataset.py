@@ -148,16 +148,25 @@ class CarlaH5GlobalDatasetWithSequence(Dataset):
     def __len__(self):
         #return self.frames_per_file * len(self.file_paths)
         #return self.frames_per_file * self.total_files
-        return len(self.all_images) - (self.sequence_len - 1) * self.stride
+        return len(self.all_images)# - (self.sequence_len - 1) * self.stride
 
     def __getitem__(self, index):
-        indices = [index + i * self.stride for i in range(self.sequence_len)]
+        # Ensure no look back at past the start of the data
+        # If index is too small, repeat the first frame
+        start_offset = (self.sequence_len - 1) * self.stride
 
-        imgs = self.all_images[indices] # shape (sequence_len, 3, 66, 200)
-        stacked_img = np.concatenate([imgs[i] for i in range(self.sequence_len)], axis=0) # shape (sequence_len*3, 66, 200)
+        if index < start_offset:
+            # "Cold start" for the beginning of the dataset
+            indices = [0] * self.sequence_len  # literally just use the first one
+        else:
+            # Look BACKWARDS: e.g., [index-4, index-2, index]
+            indices = [index - (self.sequence_len - 1 - i) * self.stride for i in range(self.sequence_len)]
+        
+        # Stack images: (9, 66, 200)
+        imgs = self.all_images[indices]
+        stacked_img = np.concatenate([imgs[i] for i in range(self.sequence_len)], axis=0)
+        
+        # Target is the control for the CURRENT frame (index)
+        targets = self.all_targets[index][:2] 
 
-        # Target corersponds to the steering / throttle of the LATEST frame
-        target_index = indices[-1]
-        targets = self.all_targets[target_index][:2] # shape (28,)
-
-        return stacked_img, torch.tensor(targets)
+        return stacked_img, torch.tensor(targets) # targets

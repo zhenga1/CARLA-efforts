@@ -10,7 +10,7 @@ from pathlib import Path
 import wandb
 
 # Hyperparameters
-lr=1e-4
+lr=2e-5
 lr_decay = 0.6
 lr_patience = 10
 lr_threshold = 0.006

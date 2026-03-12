@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from carla_model import DrivingCNN
 
 ## DEFINING SOME CONSTANT MODEL PATHS
-MODEL_PATH = "../DrivingCNN_dagger.pth"
+MODEL_PATH = "../Trained_models/DrivingCNN_dagger.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 #####
 
